@@ -98,6 +98,7 @@ fn test_develop(package: impl AsRef<Path>, bindings: Option<String>) -> Result<(
         cfg!(feature = "faster-tests"),
     )?;
 
+    println!("Running check-installed");
     check_installed(&package.as_ref(), &python)?;
     Ok(())
 }
