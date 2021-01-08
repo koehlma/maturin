@@ -3,7 +3,7 @@ name: Run tests
 on:
   push:
     branches:
-      - master
+      - windows-linker-experiments
   pull_request:
 
 jobs:
