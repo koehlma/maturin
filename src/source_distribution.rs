@@ -3,6 +3,7 @@ use crate::{Metadata21, SDistWriter};
 use anyhow::{bail, format_err, Context, Result};
 use cargo_metadata::Metadata;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::{fs, str};
@@ -32,20 +33,13 @@ pub fn warn_on_local_deps(cargo_metadata: &Metadata) {
     }
 }
 
-/// Creates a source distribution
-///
-/// Runs `cargo package --list --allow-dirty` to obtain a list of files to package.
-///
-/// The source distribution format is specified in
-/// [PEP 517 under "build_sdist"](https://www.python.org/dev/peps/pep-0517/#build-sdist)
-/// and in
-/// https://packaging.python.org/specifications/source-distribution-format/#source-distribution-file-format
-pub fn source_distribution(
-    wheel_dir: impl AsRef<Path>,
-    metadata21: &Metadata21,
+/// Copies the files of a crate to a source distribution, recursively adding path dependencies
+fn add_crate_to_source_distribution(
+    writer: &mut SDistWriter,
     manifest_path: impl AsRef<Path>,
-    sdist_include: Option<&Vec<String>>,
-) -> Result<PathBuf> {
+    prefix: impl AsRef<Path>,
+    resolved_deps: &mut HashMap<String, PathBuf>,
+) -> Result<()> {
     let output = Command::new("cargo")
         .args(&["package", "--list", "--allow-dirty", "--manifest-path"])
         .arg(manifest_path.as_ref())
@@ -87,17 +81,39 @@ pub fn source_distribution(
         )
     }
 
+    writer.add_directory(&prefix)?;
+    for (target, source) in target_source {
+        println!("{} {}", target.display(), source.display());
+        writer.add_file(prefix.as_ref().join(target), source)?;
+    }
+
+    Ok(())
+}
+
+/// Creates a source distribution
+///
+/// Runs `cargo package --list --allow-dirty` to obtain a list of files to package.
+///
+/// The source distribution format is specified in
+/// [PEP 517 under "build_sdist"](https://www.python.org/dev/peps/pep-0517/#build-sdist)
+/// and in
+/// https://packaging.python.org/specifications/source-distribution-format/#source-distribution-file-format
+pub fn source_distribution(
+    wheel_dir: impl AsRef<Path>,
+    metadata21: &Metadata21,
+    manifest_path: impl AsRef<Path>,
+    sdist_include: Option<&Vec<String>>,
+) -> Result<PathBuf> {
     let mut writer = SDistWriter::new(wheel_dir, &metadata21)?;
     let root_dir = PathBuf::from(format!(
         "{}-{}",
         &metadata21.get_distribution_escaped(),
         &metadata21.get_version_escaped()
     ));
-    writer.add_directory(&root_dir)?;
-    for (target, source) in target_source {
-        println!("{} {}", target.display(), source.display());
-        writer.add_file(root_dir.join(target), source)?;
-    }
+
+    add_crate_to_source_distribution(&mut writer, &manifest_path, &root_dir, &mut HashMap::new())?;
+
+    let manifest_dir = manifest_path.as_ref().parent().unwrap();
 
     if let Some(include_targets) = sdist_include {
         for pattern in include_targets {
